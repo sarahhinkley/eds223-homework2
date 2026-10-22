@@ -1,0 +1,102 @@
+
+```{r}
+library(tidyverse)
+library(sf)
+library(here)
+library(tmap)
+library(stars)
+library(gt)
+```
+
+
+```{r}
+# Read in geodatabase of EJScreen data at the Census Block Group level
+ejscreen <- sf::st_read(here::here("data", "ejscreen","EJSCREEN_2023_BG_StatePct_with_AS_CNMI_GU_VI.gdb")) 
+
+# For EJ Screen: filter to a county you are interested in
+los_angeles <- ejscreen %>%
+  dplyr::filter(CNTY_NAME %in% c("Los Angeles County"))
+
+# Reak in Bike and Pedestrian Crash Reports data 
+crashes <- read_csv(here::here("data", "SWITRS_LA", "Crashes.csv")) |> 
+    as_tibble() |> 
+    drop_na(POINT_X) |> 
+    drop_na(POINT_Y) |> 
+    st_as_sf(coords = c("POINT_X", "POINT_Y"), crs = 4326, remove = FALSE)
+
+# Read in HOLC Redlining data
+redlining <- sf::st_read(here::here("data", "mapping-inequality", "mapping-inequality-los-angeles.json"))
+```
+
+
+```{r}
+# Check if the los_angeles CRS and crashes CRS match
+if(st_crs(los_angeles) == st_crs(crashes)) {
+    print("CRS matches")
+} else {
+    warning('CRS does not match')
+}
+
+# Check if the redlining CRS and crashes CRS match
+if(st_crs(redlining) == st_crs(crashes)) {
+    print("CRS matches")
+} else {
+    warning('CRS does not match')
+}
+
+# Match the los_angeles CRS with the crashes CRS
+los_angeles <- st_transform(los_angeles, crs = st_crs(crashes))
+
+# Check
+if(st_crs(los_angeles) == st_crs(crashes)){
+  print("CRS matches")
+} else {
+  print("CRS still not a match")
+}
+```
+
+```{r}
+# See the unique values in grade column of redlining
+unique(redlining$grade)
+
+# Create a color palette for the different values in the grade column of redlining
+redlining_palette <- c(
+      "A" = "#1a63e0",
+      "B" = "#20e050",
+      "C" = "#ffff77",
+      "D" = "#e01044",
+      "Missing" = "#c8c1c3")
+```
+
+```{r}
+# Create a map
+tm_shape(redlining) +
+    tm_polygons(fill = "grade",
+                title = "HOLC Grade", 
+                palette = redlining_palette) + 
+    tm_title("Historical Redlining Neighborhoods in Los Angeles, CA") + 
+    tm_basemap("OpenStreetMap", alpha = 0.6)
+```
+
+```{r}
+# Because of duplicate geometries, we need to do this (ask Annie!)
+los_angeles <- st_make_valid(los_angeles)
+redlining <- st_make_valid(redlining)
+
+# Join los_angeles and redlining
+# The CRS for the two datasets have to match because the only thing the two datasets have in common are their CRS
+join_los_angeles_redlining <- st_join(los_angeles, redlining) 
+
+# Drop geometry column from joined data
+# Now that the datasets are joined, we no longer need the geometry column (the code will run faster without it and we can run tidyverse)
+join_los_angeles_redlining <- st_drop_geometry(join_los_angeles_redlining)
+
+# Create a table summarizing the percentage of census block groups that fall within a HOLC grade and the percentage of census block groups that do not have a HOLC grade
+los_angeles_redlining_percent <- join_los_angeles_redlining |> 
+    mutate(grade = ifelse(is.na(grade), "No HOLC Grade", grade)) |> 
+    count(grade) |> 
+    mutate(percent_of_grade = (n / sum(n)) * 100)
+
+# Render the table
+gt(los_angeles_redlining_percent)
+```
