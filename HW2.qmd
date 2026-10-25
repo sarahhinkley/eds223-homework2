@@ -103,7 +103,9 @@ tm_shape(redlining) +
                 title = "HOLC Grade", 
                 palette = redlining_palette) + 
     tm_title("Historical Redlining Neighborhoods in Los Angeles, CA") + 
-    tm_basemap("OpenStreetMap", alpha = 0.6)
+    tm_basemap("OpenStreetMap", alpha = 0.6) +
+    tm_compass(position = c("left", "bottom")) +
+    tm_scalebar(position = c("right", "bottom"), text.size = 0.6, breaks = c(0, 5, 10, 15))
 ```
 
 ## Create a table of the HOLC/no-HOLC data in LA County
