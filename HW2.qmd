@@ -203,8 +203,9 @@ Residents in lower-graded neighborhoods were often denied home loans, likely mak
 ```{r}
 # Determining if LATITUDE and LONGITUDE or POINT_X and POINT_Y have less NAs
 sum(crashes$LATITUDE == "NA") # has 97,350 NAs
-sum(crashes$POINT_X == "NA") # has 9,484 
+sum(crashes$POINT_X == "NA") # has 9,484 NAs
 # POINT_X and POINT_Y should be used because there are much less NAs than LATITUDE and LONGITUDE
+# note: if POINT_X has 9,484 NAs, so does POINT_Y and same for LAT/LONG which is why we only have to sum the NAs in one of each
 
 # Converting "NA" strings to NA values
 crashes$POINT_X[crashes$POINT_X == "NA"] <- NA
@@ -230,16 +231,18 @@ crashes <- crashes |>
         POINT_X, 
         POINT_Y
         ) |> 
+    # keep row if the accident year is between 2020 and 2025
     filter(
         ACCIDENT_YEAR >= as.integer("2020") & 
             ACCIDENT_YEAR <= as.integer("2025")
         ) |> 
+    # keep row if there was a pedestrian or bicyclist accident
     filter(
         PEDESTRIAN_ACCIDENT == "Y" | BICYCLE_ACCIDENT == "Y"
         ) |> 
-    # dropping NAs; missing values in coordinates not allowed
+    # missing values in coordinates is not allowed so drop NAs
     drop_na(POINT_X, POINT_Y) |>
-    # converting a df object to an sf
+    # change crashes from a df to an sf
     st_as_sf(coords = c("POINT_X", "POINT_Y"), crs = "EPSG:4326") |>
     st_transform(st_crs(redlining)) # match the CRS to the CRS of redlining
 
@@ -284,7 +287,7 @@ crashes_redlining |>
     labs(
         x = 'HOLC Grade',
         y = 'Percent',
-        title = 'Percent of Pedestrian and Bicycle Accidents Within Each HOLC grade in LA County',
+        title = 'Percent of Pedestrian and Bicycle Accidents in LA County',
         fill = 'HOLC Grade'
     ) +
     scale_fill_manual(values = redlining_palette) + # set bar colors
