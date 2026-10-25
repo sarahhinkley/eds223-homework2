@@ -27,6 +27,8 @@ library(gt)
 
 ### Read data
 ```{r}
+#| results: hide
+
 # Read in geodatabase of EJScreen data at the Census Block Group level
 ejscreen <- sf::st_read(here::here("data", "ejscreen","EJSCREEN_2023_BG_StatePct_with_AS_CNMI_GU_VI.gdb")) 
 
@@ -34,41 +36,46 @@ ejscreen <- sf::st_read(here::here("data", "ejscreen","EJSCREEN_2023_BG_StatePct
 los_angeles <- ejscreen %>%
   dplyr::filter(CNTY_NAME %in% c("Los Angeles County"))
 
-# Reak in Bike and Pedestrian Crash Reports data 
-crashes <- read_csv(here::here("data", "SWITRS_LA", "Crashes.csv")) |> 
-    as_tibble() |> 
-    drop_na(POINT_X) |> 
-    drop_na(POINT_Y) |> 
-    st_as_sf(coords = c("POINT_X", "POINT_Y"), crs = 4326, remove = FALSE)
+# Read in Bike and Pedestrian Crash Reports data 
+crashes <- sf::st_read(here::here("data", "SWITRS_LA","Crashes.csv")) 
 
 # Read in HOLC Redlining data
 redlining <- sf::st_read(here::here("data", "mapping-inequality", "mapping-inequality-los-angeles.json"))
 ```
 
-### Coordinate Reference System (CRS) 
+### Preparing Coordinate Reference System (CRS) for Part 1
 ```{r}
-# Check if the los_angeles CRS and crashes CRS match
-if(st_crs(los_angeles) == st_crs(crashes)) {
+#| warning: true
+
+# Check if the los_angeles CRS and redlining CRS match
+if(st_crs(los_angeles) == st_crs(redlining)) {
     print("CRS matches")
 } else {
     warning('CRS does not match')
 }
+```
 
-# Check if the redlining CRS and crashes CRS match
-if(st_crs(redlining) == st_crs(crashes)) {
+```{r}
+#| output: false
+
+# Check CRS of los_angeles
+st_crs(los_angeles) # the CRS is EPSG:3857
+```
+
+```{r}
+# Transform CRS of redlining to match CRS of los_angeles
+redlining <- st_transform(
+    redlining, 
+    crs = st_crs(los_angeles)
+    )
+```
+
+```{r}
+# Confirm the tranformation worked and the CRS now matches
+if(st_crs(los_angeles) == st_crs(redlining)) {
     print("CRS matches")
 } else {
     warning('CRS does not match')
-}
-
-# Match the los_angeles CRS with the crashes CRS
-los_angeles <- st_transform(los_angeles, crs = st_crs(crashes))
-
-# Check
-if(st_crs(los_angeles) == st_crs(crashes)){
-  print("CRS matches")
-} else {
-  print("CRS still not a match")
 }
 ```
 
@@ -101,7 +108,8 @@ tm_shape(redlining) +
 
 ## Create a table of the HOLC/no-HOLC data in LA County
 ```{r}
-# Because of duplicate geometries, we need to do this 
+# Reprojecting can create invalid geometries (ex. the polygons have overlapping vertices)
+# st_make_valid() rebuilds these geometries without removing any points, so the join can run without errors
 los_angeles <- st_make_valid(los_angeles)
 redlining <- st_make_valid(redlining)
 
@@ -110,7 +118,7 @@ redlining <- st_make_valid(redlining)
 join_los_angeles_redlining <- st_join(los_angeles, redlining) 
 
 # Drop geometry column from joined data
-# Now that the datasets are joined, we no longer need the geometry column (the code will run faster without it and we can run tidyverse)
+# Now that the datasets are joined, we no longer need the geometry column (code will run faster without it)
 join_los_angeles_redlining <- st_drop_geometry(join_los_angeles_redlining)
 
 # Create a table summarizing the percentage of census block groups that fall within a HOLC grade and the percentage of census block groups that do not have a HOLC grade
@@ -120,10 +128,13 @@ los_angeles_redlining_percent <- join_los_angeles_redlining |>
     mutate(percent_of_grade = (n / sum(n)) * 100)
 
 # Render the table
-gt(los_angeles_redlining_percent)
+gt(los_angeles_redlining_percent) |> 
+    tab_header(title = 'Percent of Census Block Groups Within Each HOLC Grade in LA County')
 ```
 
-## Visualizations summarizing the percentages of Low Income, and Low Life Expectancy and PM 2.5 Percentiles within each HOLC grade
+## Visualizations summarizing the percentages of Low Income, and Low Life Expectancy and PM2.5 Percentiles within each HOLC grade
+
+### Low-Income
 ```{r}
 # Find the mean for the percentage of low income individuals per HOLC grade in LA County
 mean_low_income_pct <- join_los_angeles_redlining |> 
@@ -141,8 +152,10 @@ ggplot(mean_low_income_pct, mapping = aes(x = grade, y = avg_pct_low_inc, fill =
     theme(legend.position = "none") # hide legend
 ```
 
+
+### PM2.5
 ```{r}
-# Find the mean for the PM 2.5 percentiles per HOLC grade in LA County
+# Find the mean for the PM2.5 percentiles per HOLC grade in LA County
 mean_pm25_percentile <- join_los_angeles_redlining |> 
     group_by(grade) |> 
     drop_na(grade) |> 
@@ -154,12 +167,13 @@ ggplot(mean_pm25_percentile, mapping = aes(x = grade, y = avg_pm25, fill = grade
     labs(title = 'Average PM2.5 Percentile by HOLC Grade in LA County', 
          x = 'HOLC Grade',
          y = 'Percentile') +
-    scale_fill_manual(values = redlining_palette) +
-    theme(legend.position = "none")
+    scale_fill_manual(values = redlining_palette) + # set bar colors
+    theme(legend.position = "none") # hide legend
 ```
 
+### Low Life Expectancy
 ```{r}
-# Find the mean for the life expectancy percentiles per HOLC grade in LA County
+# Find the mean for the low life expectancy percentiles per HOLC grade in LA County
 mean_life_expt_percentile <- join_los_angeles_redlining |> 
     group_by(grade) |> 
     drop_na(grade) |> 
@@ -168,54 +182,112 @@ mean_life_expt_percentile <- join_los_angeles_redlining |>
 # Create a bar chart to display mean_life_expt_percentile
 ggplot(mean_life_expt_percentile, mapping = aes(x = grade, y = avg_life_expt, fill = grade)) +
     geom_col() +
-    labs(title = 'Average Low Life Expectancy Percentile by HOLC Grade in LA County',         
+    labs(title = 'Average Low Life Expectancy Percentile in LA County',         
          x = 'HOLC Grade',
          y = 'Percentile' ) +
-    scale_fill_manual(values = redlining_palette) +
-    theme(legend.position = "none")
+    scale_fill_manual(values = redlining_palette) + # set bar colors
+    theme(legend.position = "none") # hide legend
 ```
 
+## Interpretation of the Results
+In all three figures, conditions generally get worse from Grade A to Grade D neighborhoods. The average share of low-income residents goes from about 15% in Grade A neighborhoods to 39% in Grade D neighborhoods. The average percentile for low life expectancy also increases from about 24 to 53, and PM2.5 percentiles go from about 72 to 80. The difference in air pollution is smaller, but it still follows the same pattern. Overall, these results show that neighborhoods that were graded lower during redlining tend to have worse economic and health outcomes today.
+
+Residents in lower-graded neighborhoods were often denied home loans, likely making it harder to buy homes and build up wealth. The lower-graded neighborhoods likely had lower property values and less political influence, which may have made them more likely to have industrial areas or freeways nearby. Both can contribute to higher air pollution, and long-term exposure to pollution (along with economic disadvantages) can affect people's health. This could help explain why Grade D neighborhoods also have worse life expectancy outcomes. While this analysis does not prove that redlining directly caused these differences, it shows a clear relationship between historical redlining grades and conditions today.
+
+
 # Part 2: Legacy of redlining in pedestrian and bike accidents
+
+### Preparing NA Values for Part 2
+```{r}
+# Determining if LATITUDE and LONGITUDE or POINT_X and POINT_Y have less NAs
+sum(crashes$LATITUDE == "NA") # has 97,350 NAs
+sum(crashes$POINT_X == "NA") # has 9,484 
+# POINT_X and POINT_Y should be used because there are much less NAs than LATITUDE and LONGITUDE
+
+# Converting "NA" strings to NA values
+crashes$POINT_X[crashes$POINT_X == "NA"] <- NA
+crashes$POINT_Y[crashes$POINT_Y == "NA"] <- NA
+```
+
+### Matching the CRS and turning a df into an sf object for Part 2
+```{r}
+#| output: false
+st_crs(redlining) # uses WGS84 and CRS is ESPG:3857
+# In the metadata for SWITRS, it says that POINT_X and POINT_Y use WGS84
+```
+
+```{r}
+# We loaded in crashes as a dataframe, it needs to be an sf object (dataframes cannot recognize geographic coordinates and we cannot have POINT_X/Y treated like numbers)
+crashes <- crashes |> 
+    select( # pull out important columns (no LAT/LONG because we are using POINT_X/Y instead)
+        ACCIDENT_YEAR, 
+        PEDESTRIAN_ACCIDENT, 
+        BICYCLE_ACCIDENT, 
+        COUNT_PED_KILLED, 
+        COUNT_BICYCLIST_KILLED, 
+        POINT_X, 
+        POINT_Y
+        ) |> 
+    filter(
+        ACCIDENT_YEAR >= as.integer("2020") & 
+            ACCIDENT_YEAR <= as.integer("2025")
+        ) |> 
+    filter(
+        PEDESTRIAN_ACCIDENT == "Y" | BICYCLE_ACCIDENT == "Y"
+        ) |> 
+    # dropping NAs; missing values in coordinates not allowed
+    drop_na(POINT_X, POINT_Y) |>
+    # converting a df object to an sf
+    st_as_sf(coords = c("POINT_X", "POINT_Y"), crs = "EPSG:4326") |>
+    st_transform(st_crs(redlining)) # match the CRS to the CRS of redlining
+
+# Confirm we have matched the CRS
+if(st_crs(redlining) == st_crs(crashes)) {
+    print("CRS matches")
+} else {
+    warning('CRS does not match')
+}
+```
 
 ## Create a table and figure summarizing the percent of observations within redlined neighborhoods within each HOLC grade
 
 ```{r}
-# Keep columns that describe the number of Pedestrian and Bicycle Accidents and keep POINT X and POINT y since those NAs were removed in data cleaning
-ped_bike_crashes <- crashes |> 
-  select(POINT_X, POINT_Y, PEDESTRIAN_ACCIDENT, BICYCLE_ACCIDENT)
+# Join crashes dataframe with redlining dataframe
+join_crashes_redlining <- st_join(crashes, redlining)
 
-# Classify NAs as No Accident in PEDESTRIAN_ACCIDENT and BICYCLE_ACCIDENT columns
-ped_bike_crashes <- ped_bike_crashes |> 
-  mutate(PEDESTRIAN_ACCIDENT = ifelse(is.na(PEDESTRIAN_ACCIDENT), "No Accident", PEDESTRIAN_ACCIDENT)) |> 
-  mutate(BICYCLE_ACCIDENT = ifelse(is.na(BICYCLE_ACCIDENT), "No Accident", BICYCLE_ACCIDENT))
+# Create a new data frame using the joined dataframe that summarized the crashes and fatalities of pedestrians and bicyclists 
+crashes_redlining <- join_crashes_redlining |>
+    st_drop_geometry() |> 
+    filter(!is.na(grade)) |> # drop NAs in grade column
+    group_by(grade) |>  
+    summarize(
+        total = sum(PEDESTRIAN_ACCIDENT == "Y", # count if there were pedestrian accidents
+                    BICYCLE_ACCIDENT == "Y", # or bicycle accidents
+                    as.integer(COUNT_PED_KILLED) != 0, # count if people were killed in pedestrian accidents
+                    as.integer(COUNT_BICYCLIST_KILLED) != 0, # and bicyclist
+                    na.rm = TRUE)
+    ) |> 
+    mutate(percentage = total/sum(total) * 100) # adding percentage column
 
-# Join cleaned crashes with redlining and drop geometry column
-join_crashes_redlining <- st_join(ped_bike_crashes, redlining) |> 
-  st_drop_geometry()
-
-# Table describing the percent of observations within each HOLC grade
-crashes_redlining_percent <- join_crashes_redlining |>
-  mutate(
-    grade = ifelse(is.na(grade), "No HOLC Grade", grade)
-  ) |>  
-  filter(PEDESTRIAN_ACCIDENT == "Y" | BICYCLE_ACCIDENT == "Y") |>
-  count(grade) |>
-  mutate(percent = (n / sum(n)) * 100) |> 
-  select(-n)
-
-# Render table of crashes_redlining_percent
-gt(crashes_redlining_percent) |> 
+# Render table of crashes_redlining
+gt(crashes_redlining) |> 
   tab_header(title = 'Percent of Pedestrian and Bicycle Accidents Within Each HOLC grade in LA County')
 ```
+
 ```{r}
-# Graph of Pedestrian and Bicycle Accidents per HOLC Grade in LA County
-ggplot(crashes_redlining_percent, aes(x = grade, y = percent, fill = grade)) +
-  geom_col() +
-  labs(
-    title = 'Pedestrian and Bicycle Accidents per HOLC Grade in LA County',
-    x = 'HOLC Grade',
-    y = 'Percent'
-  ) +
-  scale_fill_manual(values = redlining_palette) +
-  theme(legend.position = "none")
+# Plotting percentages of the sum of bike and pedestrian crashes and fatalities
+crashes_redlining |> 
+    ggplot(mapping = aes(x = grade, y = percentage, fill = grade)) +
+    geom_col() +
+    labs(
+        x = 'HOLC Grade',
+        y = 'Percent',
+        title = 'Percent of Pedestrian and Bicycle Accidents Within Each HOLC grade in LA County',
+        fill = 'HOLC Grade'
+    ) +
+    scale_fill_manual(values = redlining_palette) + # set bar colors
+  theme(legend.position = "none") # hide legend
 ```
+
+## Interpretation of Results
+Pedestrian and bicycle crashes and fatalities in HOLC-graded areas of LA County were heavily concentrated in lower-graded neighborhoods. Grade C neighborhoods accounted for 57.5% and grade D for 29.0%, while Grade B accounted for 11.3% and Grade A for only 2.2%. Together, the two lowest grades (C and D) account for about 86.5% of the total. However, Grade C neighborhoods cover much more of Los Angeles than Grade A neighborhoods, so some of this difference may just reflect their larger size rather than more dangerous streets.
