@@ -210,6 +210,8 @@ sum(crashes$POINT_X == "NA") # has 9,484 NAs
 # Converting "NA" strings to NA values
 crashes$POINT_X[crashes$POINT_X == "NA"] <- NA
 crashes$POINT_Y[crashes$POINT_Y == "NA"] <- NA
+# As a text string, R does not think of NA as a missing value, it sees it as two letters
+# For this analysis, we need R to recognize NA values not "NA" strings
 ```
 
 ### Matching the CRS and turning a df into an sf object for Part 2
@@ -242,10 +244,12 @@ crashes <- crashes |>
         ) |> 
     # missing values in coordinates is not allowed so drop NAs
     drop_na(POINT_X, POINT_Y) |>
-    # change crashes from a df to an sf
+    # change crashes from a dataframe to an sf object
     st_as_sf(coords = c("POINT_X", "POINT_Y"), crs = "EPSG:4326") |>
     st_transform(st_crs(redlining)) # match the CRS to the CRS of redlining
+```
 
+```{r}
 # Confirm we have matched the CRS
 if(st_crs(redlining) == st_crs(crashes)) {
     print("CRS matches")
@@ -266,23 +270,23 @@ crashes_redlining <- join_crashes_redlining |>
     filter(!is.na(grade)) |> # drop NAs in grade column
     group_by(grade) |>  
     summarize(
-        total = sum(PEDESTRIAN_ACCIDENT == "Y", # count if there were pedestrian accidents
+        total = sum(
+                    PEDESTRIAN_ACCIDENT == "Y", # count pedestrian accidents
                     BICYCLE_ACCIDENT == "Y", # or bicycle accidents
-                    as.integer(COUNT_PED_KILLED) != 0, # count if people were killed in pedestrian accidents
-                    as.integer(COUNT_BICYCLIST_KILLED) != 0, # and bicyclist
-                    na.rm = TRUE)
+                    as.integer(COUNT_PED_KILLED) != 0, # count people killed in pedestrian accidents
+                    as.integer(COUNT_BICYCLIST_KILLED) != 0, # and bicyclist accidents
+                    na.rm = TRUE) # ignore missing values instead of returning NA
     ) |> 
     mutate(percentage = total/sum(total) * 100) # adding percentage column
 
 # Render table of crashes_redlining
 gt(crashes_redlining) |> 
-  tab_header(title = 'Percent of Pedestrian and Bicycle Accidents Within Each HOLC grade in LA County')
+  tab_header(title = 'Percent of Pedestrian and Bicycle Accidents Within Each HOLC Grade in LA County')
 ```
 
 ```{r}
-# Plotting percentages of the sum of bike and pedestrian crashes and fatalities
-crashes_redlining |> 
-    ggplot(mapping = aes(x = grade, y = percentage, fill = grade)) +
+# Bar plot of percentages of the sum of bike and pedestrian crashes and fatalities
+ggplot(crashes_redlining, mapping = aes(x = grade, y = percentage, fill = grade))  + 
     geom_col() +
     labs(
         x = 'HOLC Grade',
@@ -291,7 +295,7 @@ crashes_redlining |>
         fill = 'HOLC Grade'
     ) +
     scale_fill_manual(values = redlining_palette) + # set bar colors
-  theme(legend.position = "none") # hide legend
+    theme(legend.position = "none") # hide legend
 ```
 
 ## Interpretation of Results
