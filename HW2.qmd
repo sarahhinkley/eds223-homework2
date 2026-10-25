@@ -1,4 +1,21 @@
+---
+title: "EDS 223: Homework Assignment 2"
+subtitle: "Exploring Patterns of Environmental Justice: Historical HOLC Redlining and Los Angeles County"
+author: "Sarah A. Hinkley"
+date: 2026-10-24
+format:
+  pdf:
+    toc: false
+    code-fold: false
+format-links: [typst]
+execute:
+  echo: true
+  message: false
+  warning: false
+  results: hide 
+---
 
+### Load packages
 ```{r}
 library(tidyverse)
 library(sf)
@@ -8,7 +25,7 @@ library(stars)
 library(gt)
 ```
 
-
+### Read data
 ```{r}
 # Read in geodatabase of EJScreen data at the Census Block Group level
 ejscreen <- sf::st_read(here::here("data", "ejscreen","EJSCREEN_2023_BG_StatePct_with_AS_CNMI_GU_VI.gdb")) 
@@ -28,7 +45,7 @@ crashes <- read_csv(here::here("data", "SWITRS_LA", "Crashes.csv")) |>
 redlining <- sf::st_read(here::here("data", "mapping-inequality", "mapping-inequality-los-angeles.json"))
 ```
 
-
+### Coordinate Reference System (CRS) 
 ```{r}
 # Check if the los_angeles CRS and crashes CRS match
 if(st_crs(los_angeles) == st_crs(crashes)) {
@@ -55,6 +72,7 @@ if(st_crs(los_angeles) == st_crs(crashes)){
 }
 ```
 
+### Color palette for map and figures
 ```{r}
 # See the unique values in grade column of redlining
 unique(redlining$grade)
@@ -68,8 +86,11 @@ redlining_palette <- c(
       "Missing" = "#c8c1c3")
 ```
 
+# Part 1: Legacy of redlining in current environmental (in)justice
+
+## Create a map of historical redlining neighborhoods in LA County
 ```{r}
-# Create a map
+# Use tmaps to visualize the neighborhoods in LA County that have recieved an HOLC grade
 tm_shape(redlining) +
     tm_polygons(fill = "grade",
                 title = "HOLC Grade", 
@@ -78,8 +99,9 @@ tm_shape(redlining) +
     tm_basemap("OpenStreetMap", alpha = 0.6)
 ```
 
+## Create a table of the HOLC/no-HOLC data in LA County
 ```{r}
-# Because of duplicate geometries, we need to do this (ask Annie!)
+# Because of duplicate geometries, we need to do this 
 los_angeles <- st_make_valid(los_angeles)
 redlining <- st_make_valid(redlining)
 
@@ -99,4 +121,101 @@ los_angeles_redlining_percent <- join_los_angeles_redlining |>
 
 # Render the table
 gt(los_angeles_redlining_percent)
+```
+
+## Visualizations summarizing the percentages of Low Income, and Low Life Expectancy and PM 2.5 Percentiles within each HOLC grade
+```{r}
+# Find the mean for the percentage of low income individuals per HOLC grade in LA County
+mean_low_income_pct <- join_los_angeles_redlining |> 
+    group_by(grade) |> 
+    drop_na(grade) |> 
+    summarise(avg_pct_low_inc = (mean(LOWINCPCT, na.rm = TRUE) * 100)) # create a column of the averages
+
+# Create a bar chart to display mean_low_income_pct
+ggplot(mean_low_income_pct, mapping = aes(x = grade, y = avg_pct_low_inc, fill = grade)) +
+    geom_col() +
+    labs(title = 'Average % of Low Income by HOLC Grade in LA County', 
+         x = 'HOLC Grade',
+         y = 'Percent') +
+    scale_fill_manual(values = redlining_palette) +  # set bar colors
+    theme(legend.position = "none") # hide legend
+```
+
+```{r}
+# Find the mean for the PM 2.5 percentiles per HOLC grade in LA County
+mean_pm25_percentile <- join_los_angeles_redlining |> 
+    group_by(grade) |> 
+    drop_na(grade) |> 
+    summarise(avg_pm25 = mean(P_PM25, na.rm = TRUE))
+
+# Create a bar chart to display mean_pm25_percentile
+ggplot(mean_pm25_percentile, mapping = aes(x = grade, y = avg_pm25, fill = grade)) +
+    geom_col() +
+    labs(title = 'Average PM2.5 Percentile by HOLC Grade in LA County', 
+         x = 'HOLC Grade',
+         y = 'Percentile') +
+    scale_fill_manual(values = redlining_palette) +
+    theme(legend.position = "none")
+```
+
+```{r}
+# Find the mean for the life expectancy percentiles per HOLC grade in LA County
+mean_life_expt_percentile <- join_los_angeles_redlining |> 
+    group_by(grade) |> 
+    drop_na(grade) |> 
+    summarise(avg_life_expt = mean(P_LIFEEXPPCT, na.rm = TRUE))
+
+# Create a bar chart to display mean_life_expt_percentile
+ggplot(mean_life_expt_percentile, mapping = aes(x = grade, y = avg_life_expt, fill = grade)) +
+    geom_col() +
+    labs(title = 'Average Low Life Expectancy Percentile by HOLC Grade in LA County',         
+         x = 'HOLC Grade',
+         y = 'Percentile' ) +
+    scale_fill_manual(values = redlining_palette) +
+    theme(legend.position = "none")
+```
+
+# Part 2: Legacy of redlining in pedestrian and bike accidents
+
+## Create a table and figure summarizing the percent of observations within redlined neighborhoods within each HOLC grade
+
+```{r}
+# Keep columns that describe the number of Pedestrian and Bicycle Accidents and keep POINT X and POINT y since those NAs were removed in data cleaning
+ped_bike_crashes <- crashes |> 
+  select(POINT_X, POINT_Y, PEDESTRIAN_ACCIDENT, BICYCLE_ACCIDENT)
+
+# Classify NAs as No Accident in PEDESTRIAN_ACCIDENT and BICYCLE_ACCIDENT columns
+ped_bike_crashes <- ped_bike_crashes |> 
+  mutate(PEDESTRIAN_ACCIDENT = ifelse(is.na(PEDESTRIAN_ACCIDENT), "No Accident", PEDESTRIAN_ACCIDENT)) |> 
+  mutate(BICYCLE_ACCIDENT = ifelse(is.na(BICYCLE_ACCIDENT), "No Accident", BICYCLE_ACCIDENT))
+
+# Join cleaned crashes with redlining and drop geometry column
+join_crashes_redlining <- st_join(ped_bike_crashes, redlining) |> 
+  st_drop_geometry()
+
+# Table describing the percent of observations within each HOLC grade
+crashes_redlining_percent <- join_crashes_redlining |>
+  mutate(
+    grade = ifelse(is.na(grade), "No HOLC Grade", grade)
+  ) |>  
+  filter(PEDESTRIAN_ACCIDENT == "Y" | BICYCLE_ACCIDENT == "Y") |>
+  count(grade) |>
+  mutate(percent = (n / sum(n)) * 100) |> 
+  select(-n)
+
+# Render table of crashes_redlining_percent
+gt(crashes_redlining_percent) |> 
+  tab_header(title = 'Percent of Pedestrian and Bicycle Accidents Within Each HOLC grade in LA County')
+```
+```{r}
+# Graph of Pedestrian and Bicycle Accidents per HOLC Grade in LA County
+ggplot(crashes_redlining_percent, aes(x = grade, y = percent, fill = grade)) +
+  geom_col() +
+  labs(
+    title = 'Pedestrian and Bicycle Accidents per HOLC Grade in LA County',
+    x = 'HOLC Grade',
+    y = 'Percent'
+  ) +
+  scale_fill_manual(values = redlining_palette) +
+  theme(legend.position = "none")
 ```
